@@ -1,4 +1,6 @@
 import json, requests, os, boto3, base64, logging
+import datetime,math
+
 from botocore.exceptions import ClientError
 
 logger = logging.getLogger()
@@ -36,7 +38,7 @@ def lambda_handler(event, context):
             raise CustomError("Elastic group not found")
             
         e_group_deployment = get_elastic_group_current_deployment(e_group['id'], BEARER_TOKEN)
-        
+        e_group_deployment_last_updated = get_elastic_group_deployment_last_updated(e_group['id'],BEARER_TOKEN)        
         if not e_group_deployment == None:
             message = "Deployment ({d_id}) is in '{d_status}' state".format(d_id=e_group_deployment['id'], d_status=e_group_deployment['status'])
             if e_group_deployment['status'] in FORBIDDEN_DEPLOYMENT_STATUSES:
@@ -50,7 +52,7 @@ def lambda_handler(event, context):
                 message = deployment_response['message']
 
         acknowledgement_response = perform_victorops_incident_acknowledgement(event, victor_ops_secret_token)
-        if acknowledgement_response['is_acknowledged']:
+        if acknowledgement_response['is_acknowledged'] or e_group_deployment_last_updated['has_been_more_than_1_hour']:
             message = message + acknowledgement_response['message']
 
     except CustomError as e:
@@ -184,7 +186,7 @@ def run_elastic_group_deployment(e_group_id, BEARER_TOKEN, grace_period, batch_s
     return r_json
     
 def get_secret(secret_name):
-    
+
     secret = None
 
     # Create a Secrets Manager client
@@ -194,7 +196,7 @@ def get_secret(secret_name):
     )
 
     # In this sample we only handle the specific exceptions for the 'GetSecretValue' API.
-    # See https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html
+    # See https://docs.aws.amazon.com/sget_elastic_group_deployment_last_updatedecretsmanager/latest/apireference/API_GetSecretValue.html
     # We rethrow the exception by default.
 
     try:
@@ -231,8 +233,41 @@ def get_secret(secret_name):
             secret = base64.b64decode(get_secret_value_response['SecretBinary'])
             
     return secret
+    print(time_difference_in_hours)
+                    
     
-    
+def get_elastic_group_deployment_last_updated(e_group_id, BEARER_TOKEN):
+    message = "Resource has not completed running yet"
+    has_been_more_than_1_hour = False
+    params = "/{}/roll?limit=20&sort=createdAt:DESC".format(e_group_id)
+    headers = {'Authorization': BEARER_TOKEN}
+    r = requests.request('GET', (SPOT_INST_URI + params), headers=headers)
+    r_json = json.loads(r.text)
+    logger.info(r_json)
+
+    if 'count' in r_json['response'] and r_json['response']['count'] > 0:
+        for item in r_json['response']['items']:
+            if item["status"] == "finished":
+                    current_datetime = datetime.datetime.now()
+                    current_datetime_iso = datetime.datetime.strptime(current_datetime.isoformat(),'%Y-%m-%dT%H:%M:%S.%f' )
+                    item_updatedAt = item['updatedAt']
+                    item_updatedAt_iso = datetime.datetime.strptime(item_updatedAt, '%Y-%m-%dT%H:%M:%S.%fZ')
+                    time_difference_in_hours = math.floor(datetime.timedelta.total_seconds(current_datetime_iso-item_updatedAt_iso)/3600)
+                    if(time_difference_in_hours >= 1):
+                        has_been_more_than_1_hour = True
+                        message = "Resource has already been utilized in last 1 hour"
+                    else:
+                        message = "It has not passed the respective time"
+                        break
+            else:
+                logger.info("status is not in completed state yet")
+                break
+                
+        return {
+        "message": message,
+        "has_been_more_than_1_hour": has_been_more_than_1_hour
+    }
+
 def send_to_slack(event, status_code, message):
     try:
         e_group_name = "*" + event['e_group_name'] + "*"
