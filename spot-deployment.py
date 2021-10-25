@@ -233,7 +233,6 @@ def get_secret(secret_name):
             secret = base64.b64decode(get_secret_value_response['SecretBinary'])
             
     return secret
-    print(time_difference_in_hours)
                     
     
 def get_elastic_group_deployment_last_updated(e_group_id, BEARER_TOKEN):
