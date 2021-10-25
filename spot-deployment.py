@@ -196,7 +196,7 @@ def get_secret(secret_name):
     )
 
     # In this sample we only handle the specific exceptions for the 'GetSecretValue' API.
-    # See https://docs.aws.amazon.com/sget_elastic_group_deployment_last_updatedecretsmanager/latest/apireference/API_GetSecretValue.html
+    # See https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html
     # We rethrow the exception by default.
 
     try:
