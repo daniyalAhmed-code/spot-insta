@@ -43,16 +43,16 @@ def lambda_handler(event, context):
             message = "Deployment ({d_id}) is in '{d_status}' state".format(d_id=e_group_deployment['id'], d_status=e_group_deployment['status'])
             if e_group_deployment['status'] in FORBIDDEN_DEPLOYMENT_STATUSES:
                 raise CustomError(message)
-            elif e_group_deployment['status'] in SKIP_DEPLOYMENT_STATUSES:
+            elif e_group_deployment['status'] in SKIP_DEPLOYMENT_STATUSES or e_group_deployment_last_updated['status']:
                 do_skip_deployment = True
-        
+
         if not do_skip_deployment:
             deployment_response = perform_spot_inst_deployment(event, e_group, BEARER_TOKEN, grace_period, batch_size_percentage)
             if deployment_response['is_deployment_started']:
                 message = deployment_response['message']
 
         acknowledgement_response = perform_victorops_incident_acknowledgement(event, victor_ops_secret_token)
-        if acknowledgement_response['is_acknowledged'] or e_group_deployment_last_updated['has_been_more_than_1_hour']:
+        if acknowledgement_response['is_acknowledged']:
             message = message + acknowledgement_response['message']
 
     except CustomError as e:
@@ -236,8 +236,12 @@ def get_secret(secret_name):
                     
     
 def get_elastic_group_deployment_last_updated(e_group_id, BEARER_TOKEN):
-    message = "Resource has not completed running yet"
-    has_been_more_than_1_hour = False
+    time_limit = None
+    time_duration = os.environ["TIME_DURATION"]
+    time_in_seconds = 60
+    time = 0
+    status = False
+    
     params = "/{}/roll?limit=20&sort=createdAt:DESC".format(e_group_id)
     headers = {'Authorization': BEARER_TOKEN}
     r = requests.request('GET', (SPOT_INST_URI + params), headers=headers)
@@ -247,25 +251,28 @@ def get_elastic_group_deployment_last_updated(e_group_id, BEARER_TOKEN):
     if 'count' in r_json['response'] and r_json['response']['count'] > 0:
         for item in r_json['response']['items']:
             if item["status"] == "finished":
+
+                    if "m" in time_duration.lower():
+                        time_limit = int(time_duration.lower().split("m")[0]) 
+                        time =  time_limit * time_in_seconds
+                         
+                    elif "h" in time_duration.lower():
+                       time_limit = int(time_duration.lower().split("h")[0]) 
+                       time = time_limit * 60* time_in_seconds
+
                     current_datetime = datetime.datetime.now()
                     current_datetime_iso = datetime.datetime.strptime(current_datetime.isoformat(),'%Y-%m-%dT%H:%M:%S.%f' )
+
                     item_updatedAt = item['updatedAt']
                     item_updatedAt_iso = datetime.datetime.strptime(item_updatedAt, '%Y-%m-%dT%H:%M:%S.%fZ')
-                    time_difference_in_hours = math.floor(datetime.timedelta.total_seconds(current_datetime_iso-item_updatedAt_iso)/3600)
-                    if(time_difference_in_hours >= 1):
-                        has_been_more_than_1_hour = True
-                        message = "Resource has already been utilized in last 1 hour"
-                    else:
-                        message = "It has not passed the respective time"
-                        break
-            else:
-                logger.info("status is not in completed state yet")
-                break
-                
-        return {
-        "message": message,
-        "has_been_more_than_1_hour": has_been_more_than_1_hour
-    }
+
+                    time_difference = math.floor(datetime.timedelta.total_seconds(current_datetime_iso-item_updatedAt_iso)/time)
+
+                    if(time_difference >= 1):
+                        status = True
+                    break
+
+        return {"status":status}
 
 def send_to_slack(event, status_code, message):
     try:
