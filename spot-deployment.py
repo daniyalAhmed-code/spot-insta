@@ -38,13 +38,17 @@ def lambda_handler(event, context):
             raise CustomError("Elastic group not found")
             
         e_group_deployment = get_elastic_group_current_deployment(e_group['id'], BEARER_TOKEN)
-        e_group_deployment_last_updated = get_elastic_group_deployment_last_updated(e_group['id'],BEARER_TOKEN)        
         if not e_group_deployment == None:
             message = "Deployment ({d_id}) is in '{d_status}' state".format(d_id=e_group_deployment['id'], d_status=e_group_deployment['status'])
             if e_group_deployment['status'] in FORBIDDEN_DEPLOYMENT_STATUSES:
                 raise CustomError(message)
-            elif e_group_deployment['status'] in SKIP_DEPLOYMENT_STATUSES or e_group_deployment_last_updated['status']:
+            elif e_group_deployment['status'] in SKIP_DEPLOYMENT_STATUSES :
                 do_skip_deployment = True
+            elif e_group_deployment['status'] not in SKIP_DEPLOYMENT_STATUSES :
+                e_group_deployment_last_updated = get_elastic_group_deployment_last_updated(e_group['id'],BEARER_TOKEN)
+                message = e_group_deployment_last_updated['message']
+                if e_group_deployment_last_updated["status"]:
+                    do_skip_deployment = True
 
         if not do_skip_deployment:
             deployment_response = perform_spot_inst_deployment(event, e_group, BEARER_TOKEN, grace_period, batch_size_percentage)
@@ -236,6 +240,7 @@ def get_secret(secret_name):
                     
     
 def get_elastic_group_deployment_last_updated(e_group_id, BEARER_TOKEN):
+    message = "Resource has not completed running yet"
     time_limit = None
     time_duration = os.environ["TIME_DURATION"]
     time_in_seconds = 60
@@ -270,9 +275,10 @@ def get_elastic_group_deployment_last_updated(e_group_id, BEARER_TOKEN):
 
                     if(time_difference >= 1):
                         status = True
+                        message = "Resource has already been utilized"
                     break
 
-        return {"status":status}
+        return {"status":status,"message":message}
 
 def send_to_slack(event, status_code, message):
     try:
