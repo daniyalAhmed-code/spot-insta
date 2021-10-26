@@ -44,10 +44,10 @@ def lambda_handler(event, context):
                 raise CustomError(message)
             elif e_group_deployment['status'] in SKIP_DEPLOYMENT_STATUSES :
                 do_skip_deployment = True
-            elif e_group_deployment['status'] not in SKIP_DEPLOYMENT_STATUSES :
+            else:
                 e_group_deployment_last_updated = get_elastic_group_deployment_last_updated(e_group['id'],BEARER_TOKEN)
-                message = e_group_deployment_last_updated['message']
                 if e_group_deployment_last_updated["status"]:
+                    message = e_group_deployment_last_updated['message']
                     do_skip_deployment = True
 
         if not do_skip_deployment:
@@ -275,7 +275,7 @@ def get_elastic_group_deployment_last_updated(e_group_id, BEARER_TOKEN):
 
                     if(time_difference >= 1):
                         status = True
-                        message = "Resource has already been utilized"
+                        message = "Deployment skipped because it has already been deployed within last "+time_duration
                     break
 
         return {"status":status,"message":message}
